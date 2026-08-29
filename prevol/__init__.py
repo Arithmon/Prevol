@@ -10,13 +10,13 @@ from .coverage import (  # noqa: F401
 )
 from .core import (  # noqa: F401
     BLOCKING, REPORT, UNREADABLE,
-    check_counter_coherence, check_freshness, check_partial_run_discipline, check_provenance,
-    declared_pins, read_boolean_table, self_check, severity_counts, verdict,
+    check_counter_coherence, check_freshness, check_mutation_probe,
+    check_partial_run_discipline, check_provenance, declared_pins, read_boolean_table, self_check, severity_counts, verdict,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
-    "BLOCKING", "REPORT", "UNREADABLE", "check_counter_coherence", "check_freshness",
+    "BLOCKING", "REPORT", "UNREADABLE", "check_counter_coherence", "check_freshness", "check_mutation_probe",
     "check_partial_run_discipline", "check_provenance", "declared_pins", "read_boolean_table",
     "self_check", "severity_counts", "verdict",
     "audit_source", "check_coverage", "check_vacuity", "covers", "read_structure",

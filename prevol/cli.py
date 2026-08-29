@@ -43,7 +43,8 @@ from pathlib import Path
 from .coverage import audit_source
 from .core import (
     BLOCKING, REPORT, UNREADABLE,
-    check_counter_coherence, check_freshness, check_partial_run_discipline, check_provenance,
+    check_counter_coherence, check_freshness, check_mutation_probe,
+    check_partial_run_discipline, check_provenance,
     self_check, severity_counts, verdict,
 )
 
@@ -145,7 +146,8 @@ def audit_artifact(tree: Tree, name, artifact, read_source=True):
     findings = (check_freshness(artifact, producer_name, producer_sha, tree.is_partial_name(name))
                 + check_counter_coherence(artifact)
                 + check_provenance(artifact, tree.resolver())
-                + check_partial_run_discipline(tree.is_partial_name(name), artifact))
+                + check_partial_run_discipline(tree.is_partial_name(name), artifact)
+                + check_mutation_probe(artifact))
     summary = None
     if read_source and producer is not None:
         names = {k: v for k, v in (("gate_names", tree.layout["gate_names"]),

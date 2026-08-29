@@ -46,6 +46,7 @@ BLOCKING = "BLOCKING"     # must be resolved before the artifact is relied upon
 REPORT = "REPORT"         # worth knowing; never stops anything on its own
 UNREADABLE = "UNREADABLE"  # a generic checker cannot interpret this — the finding is the opacity
 
+PROBE = "probe"
 FRESHNESS = "freshness"
 COUNTERS = "counters"
 PROVENANCE = "provenance"
@@ -236,6 +237,39 @@ def check_partial_run_discipline(is_partial_name, artifact):
     return []
 
 
+def check_mutation_probe(artifact, probe_key="mutation_probe"):
+    """The executed tier: did each gate actually fail under a deliberate mutation?
+
+    Reading that a control invokes a gate's predicate is evidence of a link; it is not proof that the
+    gate *fails*. Only running the mutation proves that — and running it is not this checker's business.
+    A checker that executed the code it audits could be made to lie by that code. So the producer runs
+    its own probe and records the outcome; this reads the record.
+
+    The block is ``{gate: {mutation_name: gate_went_red}}``. A gate listed with no mutation that made it
+    fail is the finding this whole tool exists for: a gate that survives every attempt to break it has
+    not been shown to measure anything. A gate absent from the probe is merely unprobed.
+
+    Absent block, no findings: the tier is opt-in, and a producer that has not adopted it is not at fault.
+    """
+    probe = artifact.get(probe_key)
+    if not isinstance(probe, dict) or not probe:
+        return []
+    gates, _ = read_boolean_table(artifact.get("gates", {}))
+    findings = []
+    for gate, mutations in probe.items():
+        if not isinstance(mutations, dict) or not mutations:
+            findings.append((REPORT, PROBE, f"gate `{gate}` has an empty probe entry"))
+            continue
+        if not any(v is True for v in mutations.values()):
+            findings.append((BLOCKING, PROBE,
+                             f"gate `{gate}` survived every mutation ({len(mutations)} tried) — it has "
+                             f"not been shown to detect anything"))
+    for gate in (gates or {}):
+        if gate not in probe:
+            findings.append((REPORT, PROBE, f"gate `{gate}` is never probed by a mutation"))
+    return findings
+
+
 def severity_counts(findings):
     """Aggregate findings by severity."""
     return {s: sum(1 for f in findings if f[0] == s) for s in (BLOCKING, REPORT, UNREADABLE)}
@@ -291,4 +325,12 @@ def self_check():
     negatives["N9_matching_producer_yields_no_finding_trips_G8"] = check_freshness(
         {"self_sha256": "a" * 64}, "p.py", "a" * 64, False) == []
     negatives["N10_absent_hash_invents_no_verdict_trips_G8"] = check_freshness({}, "p.py", "b" * 64, False) == []
+    gates["G9_a_gate_surviving_every_mutation_blocks"] = any(
+        f[0] == BLOCKING for f in check_mutation_probe(
+            {"gates": {"A": True}, "mutation_probe": {"A": {"m1": False, "m2": False}}}))
+    negatives["N11_a_gate_that_fails_under_one_mutation_passes_trips_G9"] = not any(
+        f[0] == BLOCKING for f in check_mutation_probe(
+            {"gates": {"A": True}, "mutation_probe": {"A": {"m1": False, "m2": True}}}))
+    negatives["N12_absent_probe_invents_no_finding_trips_G9"] = check_mutation_probe(
+        {"gates": {"A": True}}) == []
     return gates, negatives

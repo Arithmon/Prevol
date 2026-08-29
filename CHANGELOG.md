@@ -2,6 +2,27 @@
 
 All notable changes to `preflight`. Dates are ISO 8601. Versions follow semantic versioning.
 
+## [0.3.0] — 2026-08-29
+
+The executed tier, and with it the question the whole tool exists for: **did the gate actually fail?**
+
+### Added
+- `check_mutation_probe` — reads a `mutation_probe` block of the shape `{gate: {mutation: went_red}}`.
+  A gate listed with no mutation that made it fail **blocks**: a gate surviving every attempt to break it
+  has not been shown to measure anything. A gate absent from the block is merely unprobed; an absent
+  block yields no findings at all, because the tier is opt-in and a producer that has not adopted it is
+  not at fault.
+
+### The division of labour, and why it is not a compromise
+The producer runs its own mutations and records the outcome; this tool reads the record. That is not a
+limitation worked around — it is the invariant. A checker that executed the code it audits could be made
+to lie by that code. Execution belongs where execution already happens.
+
+### Validated on a real subject
+The first producer to adopt the convention carried five gates, each with two or three mutations of the
+inputs its predicate reads. All five failed under mutation, and the artifact passed with no probe
+finding. Its gates also reached full coverage in the source tier, from shared predicates alone.
+
 ## [0.2.0] — 2026-08-29
 
 The source-level tier: **do the gates have teeth?** The first tier asks whether a document's declarations

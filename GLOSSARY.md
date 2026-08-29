@@ -39,6 +39,11 @@ the *source* tier reads the producer; the *mutation* tier would execute mutation
 Each is useless before the one below it: probing whether a gate fails is meaningless while nothing links
 the gate to the control meant to test it.
 
+### mutation probe
+The executed evidence that a gate has teeth: a deliberate perturbation of the inputs a gate reads,
+together with the recorded outcome of whether the gate failed. Run by the producer, read by the checker —
+never the reverse, since a checker that executed its subject could be made to lie by it.
+
 ### freshness
 Whether an artifact still corresponds to the producer that emitted it, established by comparing the
 recorded producer hash against the producer on disk. Drift means the artifact describes a program that

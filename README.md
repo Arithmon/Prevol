@@ -89,12 +89,24 @@ The tool's own checks carry gates and negative controls, and **every negative co
 must trip**. A checker that cannot demonstrate its own checks have teeth has no standing to ask it of
 anything else.
 
-## What it does not do — yet
+A third tier closes the question: **did the gate actually fail?** Reading that a control invokes a gate's
+predicate is evidence of a link, not proof that the gate breaks. Only running the mutation proves that.
 
-It does not **execute** mutations. Reading that a control calls a gate's predicate is evidence of a
-link, not proof that the control makes the gate fail. That tier comes next, and it comes last on
-purpose: building a mutation probe before gates and their controls are even linked would have been
-putting the roof on the scaffolding.
+| check | question |
+|---|---|
+| `probe` | did each gate fail under at least one deliberate mutation? |
+
+The producer runs its own mutations and records `{gate: {mutation: went_red}}`; this tool reads that
+record. The division is deliberate, not a compromise: **a checker that executed the code it audits could
+be made to lie by that code.** Execution belongs where execution already happens. A gate that survived
+every mutation blocks; a gate never probed is reported; an absent block yields nothing, because the tier
+is opt-in.
+
+## What it does not do
+
+It does not invent the mutations. Which perturbations are meaningful is a question about the subject
+matter, and a generic tool that guessed them would mostly produce noise and false alarm. What it does
+enforce is that the answer be *recorded*, *machine-readable*, and *unable to be silently absent*.
 
 ## Why this exists
 
