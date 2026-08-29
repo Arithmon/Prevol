@@ -25,6 +25,25 @@ touching a single producer — which matters, because an archive of hash-pinned 
 by construction: editing a producer would invalidate the recorded producer hash of every artifact it
 ever emitted, and with it the provenance chain. History is measured, never repaired.
 
+A second tier reads the **producer's source** and asks a harder question: *would these checks have
+noticed had the result been wrong?* A gate wired to a constant passes every run, forever, and looks
+exactly like a gate that holds; the only evidence that a gate has teeth is a **negative control** — a
+deliberate mutation under which the gate must fail.
+
+| check | question |
+|---|---|
+| `coverage` | is each gate exercised by a negative control? |
+| `vacuity` | do the controls do any work at all? |
+
+Coverage is established structurally where possible: where this discipline matures on its own, a gate
+and its control end up calling the **same predicate** — the gate asks `pred(real)`, the control asks
+`not pred(mutated)`. That shared call survives renaming and cannot be faked by writing a nice name.
+Naming conventions are accepted as a weaker fallback. Measured on a real archive, names alone accounted
+for 4% of coverage; reading the code raised it to 12%.
+
+This tier reads, it never imports. A module that executed the code it audits could be made to lie by
+that code.
+
 External linters can be chained so that a single command is the whole pre-review gesture (`--linters`).
 
 ## Two severities, and scope decides
@@ -72,10 +91,10 @@ anything else.
 
 ## What it does not do — yet
 
-This is the artifact-level tier. It does not measure whether each gate is covered by a negative control,
-it does not detect a negative control that passes without testing anything, and it does not execute
-mutations to prove a gate can fail. Those tiers come next, in that order: building a mutation probe
-before gates and their negative controls are even linked would be putting the roof on the scaffolding.
+It does not **execute** mutations. Reading that a control calls a gate's predicate is evidence of a
+link, not proof that the control makes the gate fail. That tier comes next, and it comes last on
+purpose: building a mutation probe before gates and their controls are even linked would have been
+putting the roof on the scaffolding.
 
 ## Why this exists
 

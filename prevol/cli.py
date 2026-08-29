@@ -40,6 +40,7 @@ import sys
 import time
 from pathlib import Path
 
+from .coverage import audit_source
 from .core import (
     BLOCKING, REPORT, UNREADABLE,
     check_counter_coherence, check_freshness, check_partial_run_discipline, check_provenance,
@@ -52,6 +53,8 @@ DEFAULTS = {
     "producers": "scripts",        # directory holding the producers
     "partial_suffix": "_limited",  # name suffix marking a partial run
     "extra_search": [],            # further directories in which a bare pin label may be resolved
+    "gate_names": None,            # variable names collecting gates in a producer (None = package default)
+    "control_names": None,         # variable names collecting negative controls
 }
 
 
@@ -129,15 +132,32 @@ class Tree:
         return sorted(p.stem for p in self.artifacts.glob("*.json"))
 
 
-def audit_artifact(tree: Tree, name, artifact):
-    """Run the four artifact-level checks. The only place the pure core meets the filesystem."""
+def audit_artifact(tree: Tree, name, artifact, read_source=True):
+    """Every check for one artifact. The only place the pure checks meet the filesystem.
+
+    When the producer can be located and ``read_source`` is set, the source-level tier runs too: does
+    each gate have a negative control exercising it, and do the controls do any work? That tier reads,
+    it never imports — a module that executed the code it audits could be made to lie by that code.
+    """
     producer = tree.producer_of(name, artifact)
     producer_sha = tree.sha256(producer) if producer else None
     producer_name = producer.name if producer else "?"
-    return (check_freshness(artifact, producer_name, producer_sha, tree.is_partial_name(name))
-            + check_counter_coherence(artifact)
-            + check_provenance(artifact, tree.resolver())
-            + check_partial_run_discipline(tree.is_partial_name(name), artifact))
+    findings = (check_freshness(artifact, producer_name, producer_sha, tree.is_partial_name(name))
+                + check_counter_coherence(artifact)
+                + check_provenance(artifact, tree.resolver())
+                + check_partial_run_discipline(tree.is_partial_name(name), artifact))
+    summary = None
+    if read_source and producer is not None:
+        names = {k: v for k, v in (("gate_names", tree.layout["gate_names"]),
+                                   ("control_names", tree.layout["control_names"])) if v}
+        try:
+            source = producer.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            source = None
+        if source is not None:
+            source_findings, summary = audit_source(source, **names)
+            findings += source_findings
+    return findings, summary
 
 
 def run_linters(tree: Tree, specs):
@@ -177,6 +197,8 @@ def main():
                         help="comma-separated extra directories for resolving bare pin labels")
     parser.add_argument("--linters", default="", help="comma-separated linters, each `script.py[:clean_exit]`")
     parser.add_argument("--json", metavar="PATH", help="write a report that is itself a claim-bearing artifact")
+    parser.add_argument("--no-source", action="store_true",
+                        help="skip the source-level tier (gate coverage, vacuous controls)")
     parser.add_argument("--self-check", action="store_true", help="this tool's own gates and negative controls")
     args = parser.parse_args()
     started = time.time()
@@ -197,13 +219,17 @@ def main():
     single = bool(args.artifact)
     names = [args.artifact] if single else tree.names()
     per_artifact, findings = {}, []
+    coverage = {"gates": 0, "covered": 0}
     for name in names:
         artifact = tree.load(name)
         if artifact is None:
             findings.append((BLOCKING if single else REPORT, "artifact",
                              f"{name}: missing or unreadable"))
             continue
-        found = audit_artifact(tree, name, artifact)
+        found, summary = audit_artifact(tree, name, artifact, read_source=not args.no_source)
+        if summary and summary["gates"]:
+            coverage["gates"] += summary["gates"]
+            coverage["covered"] += summary["covered"]
         if found:
             per_artifact[name] = [{"severity": s, "check": c, "detail": d} for s, c, d in found]
         findings += found
@@ -219,6 +245,9 @@ def main():
         for found_severity, check, detail in findings:
             if found_severity == severity:
                 print(f"  {found_severity:10s} {check:12s} {detail}")
+    if coverage["gates"]:
+        print(f"-> gate coverage {coverage['covered']}/{coverage['gates']} "
+              f"({100 * coverage['covered'] / coverage['gates']:.1f}%)")
     print(f"-> blocking {counts[BLOCKING]} · unreadable {counts[UNREADABLE]} · "
           f"report {counts[REPORT]} · {round(time.time() - started, 1)}s")
     print(f"outcome: {outcome}")
@@ -233,7 +262,7 @@ def main():
             "scope": ("artifact:" + args.artifact) if single else "archive",
             "artifacts_examined": len(names),
             "findings_by_artifact": per_artifact,
-            "severity_counts": counts,
+            "severity_counts": counts, "gate_coverage": coverage,
             "gates": gates, "gates_passed": sum(gates.values()), "gates_total": len(gates),
             "negatives": negatives,
             "negatives_passed": sum(negatives.values()), "negatives_total": len(negatives),

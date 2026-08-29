@@ -24,6 +24,21 @@ Borrowed from experimental practice, where a control that cannot come out negati
 negative control that passes without exercising the mechanism it names is *vacuous*: it is worse than
 absent, because it looks like coverage.
 
+### shared predicate
+Evidence that a negative control exercises a gate: both invoke the same function, the gate on real input
+and the control on mutated input. Structural rather than nominal — it survives renaming and cannot be
+produced by writing a suggestive name, which is why it is preferred over naming conventions.
+
+### vacuous control
+A negative control that holds without testing anything: a bare literal, or an expression sharing no call
+with any gate. Worse than an absent control, because it looks like coverage.
+
+### tier
+A level of audit, adopted independently of the others. The *artifact* tier reads the published document;
+the *source* tier reads the producer; the *mutation* tier would execute mutations to prove a gate fails.
+Each is useless before the one below it: probing whether a gate fails is meaningless while nothing links
+the gate to the control meant to test it.
+
 ### freshness
 Whether an artifact still corresponds to the producer that emitted it, established by comparing the
 recorded producer hash against the producer on disk. Drift means the artifact describes a program that
