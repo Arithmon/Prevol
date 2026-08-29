@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: "prevol"
+message: >-
+  If you use this tool, please cite the repository with its release tag.
+type: software
+authors:
+  - family-names: "de La Fournière"
+    given-names: "Brieuc"
+repository-code: "https://github.com/Arithmon/Prevol"
+abstract: >-
+  Audit the declarations that a computational result carries, and check they
+  are still true. A result should not travel alone: it should travel with the
+  conditions under which it was produced and with the means to check what one
+  is entitled to conclude from it. prevol audits an archive of claim-bearing
+  artifacts for producer freshness, counter coherence, provenance pins that
+  still resolve to their declared hashes, and partial runs occupying the place
+  of authoritative results. All checks are read-only, because an archive of
+  hash-pinned artifacts is append-only by construction.
+keywords:
+  - reproducibility
+  - provenance
+  - research software
+  - scientific computing
+  - verification
+  - negative controls
+license: MIT
+version: "0.1.0"
+date-released: "2026-08-29"
