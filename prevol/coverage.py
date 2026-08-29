@@ -87,6 +87,56 @@ def _referenced(node):
     return {c.id for c in ast.walk(node) if isinstance(c, ast.Name)}
 
 
+def _local_bindings(tree):
+    """Plain ``name = expression`` bindings, mapping each name to the functions its expression calls.
+
+    Reading only the dict literal misses a very common and perfectly sound style: the gate is computed
+    into a local first and the dict merely collects it — ``g3 = passes(x)`` then ``{"G3_...": bool(g3)}``.
+    Read literally, that gate calls only ``bool``, so a control invoking ``passes`` directly appears to
+    share nothing with it and every control in the file is reported as possibly vacuous. Measured against
+    a real producer, this accounted for *all eight* of its controls, each one sound.
+
+    A name bound more than once contributes the union of its bindings, which can only widen the call set
+    and therefore only ever suppresses a false accusation — it cannot manufacture coverage that is absent.
+    """
+    bound = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        calls, refs = _called(node.value), _referenced(node.value)
+        if not calls and not refs:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                slot = bound.setdefault(target.id, {"calls": set(), "refs": set()})
+                slot["calls"] |= calls
+                slot["refs"] |= refs
+    return bound
+
+
+def _resolve(node, bound, depth=2):
+    """Calls made by an expression, following local bindings of the names it mentions.
+
+    Bounded depth keeps a cycle (``a = f(b)`` / ``b = g(a)``) from looping and stops the resolution from
+    dragging in half the file through a long chain of intermediates.
+    """
+    calls = set(_called(node))
+    seen = set()
+    frontier = _referenced(node)
+    for _ in range(depth):
+        nxt = set()
+        for name in frontier - seen:
+            seen.add(name)
+            slot = bound.get(name)
+            if slot:
+                calls |= slot["calls"]
+                nxt |= slot["refs"]
+        frontier = nxt - seen
+        if not frontier:
+            break
+    return calls
+
+
 def _is_literal(node):
     """True when the expression can be evaluated with no name and no call — its value is fixed in place."""
     return not _referenced(node) and not _called(node)
@@ -109,6 +159,7 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
     #  would report perfectly sound controls as constants. Later assignments to a subscript therefore
     #  override what the literal said. Measured against a real archive, this accounted for two of the
     #  three constants the first version reported, and both were sound.
+    bound = _local_bindings(tree)
     reassigned = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
@@ -118,7 +169,7 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
                     and isinstance(target.slice, ast.Constant)
                     and isinstance(target.slice.value, str)):
                 reassigned.setdefault(target.value.id, {})[target.slice.value] = {
-                    "calls": _called(node.value), "literal": _is_literal(node.value)}
+                    "calls": _resolve(node.value, bound), "literal": _is_literal(node.value)}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
             continue
@@ -132,7 +183,7 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
         for key, value in zip(node.value.keys, node.value.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
-            entry = {"calls": _called(value), "literal": _is_literal(value)}
+            entry = {"calls": _resolve(value, bound), "literal": _is_literal(value)}
             later = {k: v for name in targets for k, v in reassigned.get(name, {}).items()}
             if key.value in later:      # seeded here, computed further down
                 entry = {"calls": entry["calls"] | later[key.value]["calls"],
@@ -269,4 +320,58 @@ def self_check():
               "negatives['N1_seeded'] = not pred(0)\n")
     negatives["N7_a_seeded_control_computed_later_is_not_constant_trips_G4"] = (
         check_vacuity(read_structure(seeded)) == [])
+    return gates, negatives
+
+
+def self_check_coverage():
+    """Gates and negative controls for this module — same discipline, applied to the reader itself.
+
+    The pair that matters is G11/N16. Following local bindings *widens* the call set a gate is credited
+    with, so it can only ever suppress a finding. A widening rule earns its place only if it suppresses
+    the false ones and leaves the true ones standing, and the second half is the part that can go wrong
+    silently: a resolution that dragged in every call in the file would report perfect coverage forever
+    and look exactly like a resolution that works.
+    """
+    gates, negatives = {}, {}
+    indirect = ("def passes(x):\n    return x > 0\n"
+                "g3 = passes(value)\n"
+                "gates = {'G3_holds': bool(g3)}\n"
+                "negatives = {'N4_mutated_input_trips_G3': not passes(-1)}\n")
+    unrelated = ("def passes(x):\n    return x > 0\n"
+                 "def other(x):\n    return x\n"
+                 "g3 = passes(value)\n"
+                 "gates = {'G3_holds': bool(g3)}\n"
+                 "negatives = {'Nx_touches_nothing': other(1) == 1}\n")
+    chained = ("def passes(x):\n    return x > 0\n"
+               "raw = passes(value)\n"
+               "g3 = raw and extra\n"
+               "gates = {'G3_holds': bool(g3)}\n"
+               "negatives = {'N4_mutated_trips_G3': not passes(-1)}\n")
+
+    struct = read_structure(indirect)
+    gates["G10_follows_a_local_binding_to_the_predicate"] = (
+        "passes" in struct["gates"]["G3_holds"]["calls"])
+    gates["G11_indirect_gate_is_covered_by_its_control"] = (
+        check_coverage(struct)[1]["covered"] == 1)
+    gates["G12_follows_a_chain_of_two_bindings"] = (
+        "passes" in read_structure(chained)["gates"]["G3_holds"]["calls"])
+    gates["G13_literal_control_still_blocks"] = any(
+        f[0] == BLOCKING for f in check_vacuity(
+            read_structure("gates = {'G1_x': f(1)}\nnegatives = {'N1_y': True}\n")))
+
+    #  The load-bearing negative: resolution must not manufacture coverage. A control calling only an
+    #  unrelated function shares nothing with the gate even once bindings are followed, so it must STILL
+    #  be reported. Without this, G10-G12 would pass just as happily under a rule that credited every gate
+    #  with every call in the file.
+    negatives["N13_unrelated_control_is_still_reported_trips_G11"] = any(
+        kind == VACUITY for _, kind, _ in check_vacuity(read_structure(unrelated)))
+    negatives["N14_unrelated_gate_stays_uncovered_trips_G11"] = (
+        check_coverage(read_structure(unrelated))[1]["covered"] == 0)
+    negatives["N15_unbound_name_adds_no_call_trips_G10"] = (
+        read_structure("gates = {'G1_x': bool(never_assigned)}\n"
+                       "negatives = {'N1_y': f(1)}\n")["gates"]["G1_x"]["calls"] == {"bool"})
+    negatives["N16_resolution_is_bounded_not_global_trips_G12"] = (
+        "far" not in read_structure(
+            "a = far(1)\nb = a\nc = b\nd = c\n"
+            "gates = {'G1_x': bool(d)}\nnegatives = {'N1_y': f(1)}\n")["gates"]["G1_x"]["calls"])
     return gates, negatives

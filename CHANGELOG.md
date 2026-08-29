@@ -2,6 +2,38 @@
 
 All notable changes to `preflight`. Dates are ISO 8601. Versions follow semantic versioning.
 
+## [0.4.0] — 2026-08-30
+
+The source tier learns to follow a variable, and the reader is finally held to its own discipline.
+
+### Fixed
+- **Coverage now resolves local bindings.** The reader collected calls only from the expression sitting
+  inside the gate dictionary. That misses a common and perfectly sound style — compute the gate into a
+  local, let the dictionary collect it:
+
+      g3 = passes(value)
+      gates = {"G3_holds": bool(g3)}
+      negatives = {"N4_mutated_trips_G3": not passes(-1)}
+
+  Read literally, `G3_holds` calls only `bool`, so the control invoking `passes` appeared to share
+  nothing with it. Every control in such a file was reported as possibly vacuous, and the shared-predicate
+  signal — the one piece of evidence a rename cannot fake — was blind to it.
+
+  Measured across an archive of 1480 gates: coverage **16.2 % → 19.5 %** (+49 gates whose controls were
+  there all along), reports **2246 → 2021** (225 false accusations withdrawn), and **blocking findings
+  unchanged at 35**. That last figure is the one that matters: the rule widens what a gate is credited
+  with, so the risk was never missing a defect, it was suppressing a real one. None were.
+
+### Added
+- `self_check_coverage()` — the source tier now carries gates and negative controls of its own, merged
+  into `--self-check` (13 gates, 16 controls, up from 9 and 12). Until this release the module that
+  enforces the discipline was the only one exempt from it.
+- The load-bearing pair is **N13/N14**: a control calling only an unrelated function must *still* be
+  reported once bindings are followed. Without it, the new gates would pass just as happily under a rule
+  that credited every gate with every call in the file — which would report perfect coverage forever and
+  look exactly like a rule that works. **N16** holds the resolution to bounded depth, so a long chain of
+  intermediates cannot drag in the whole file.
+
 ## [0.3.0] — 2026-08-29
 
 The executed tier, and with it the question the whole tool exists for: **did the gate actually fail?**

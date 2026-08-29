@@ -40,7 +40,7 @@ import sys
 import time
 from pathlib import Path
 
-from .coverage import audit_source
+from .coverage import audit_source, self_check_coverage
 from .core import (
     BLOCKING, REPORT, UNREADABLE,
     check_counter_coherence, check_freshness, check_mutation_probe,
@@ -207,6 +207,11 @@ def main():
 
     if args.self_check:
         gates, negatives = self_check()
+        #  The source tier carries its own gates; a self-check that skipped them would attest less than
+        #  the tool actually claims.
+        cov_gates, cov_negatives = self_check_coverage()
+        gates.update(cov_gates)
+        negatives.update(cov_negatives)
         for name, value in {**gates, **negatives}.items():
             print(f"  {'PASS' if value else 'FAIL'}  {name}")
         print(f"self-check: gates {sum(gates.values())}/{len(gates)} · "
