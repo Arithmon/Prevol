@@ -133,12 +133,32 @@ class Tree:
         return sorted(p.stem for p in self.artifacts.glob("*.json"))
 
 
-def audit_artifact(tree: Tree, name, artifact, read_source=True):
+def demote_history(findings, why):
+    """Turn blocking findings into reports, for an artifact that is no longer authoritative.
+
+    An artifact another one has superseded is **history**, and history is allowed to be stale: its
+    producer has moved on, so no re-run can ever refresh it, and its pins point at versions that have
+    themselves been replaced. Blocking on it demands a repair that cannot be performed and that nobody
+    wants performed — the surest way to teach people to ignore the tool.
+
+    The demotion is deliberately *not* silent: the finding survives as a report and carries the reason.
+    And it is only ever safe because the caller must derive supersession from what artifacts themselves
+    declare — never from a hand-maintained list, which would be an off switch for exactly the staleness
+    this exists to surface.
+    """
+    return [(REPORT, kind, f"{detail} — {why}") if sev == BLOCKING else (sev, kind, detail)
+            for sev, kind, detail in findings]
+
+
+def audit_artifact(tree: Tree, name, artifact, read_source=True, superseded_by=None):
     """Every check for one artifact. The only place the pure checks meet the filesystem.
 
     When the producer can be located and ``read_source`` is set, the source-level tier runs too: does
     each gate have a negative control exercising it, and do the controls do any work? That tier reads,
     it never imports — a module that executed the code it audits could be made to lie by that code.
+
+    ``superseded_by``, when given, names the artifact that has replaced this one; its findings are then
+    demoted to reports rather than blocking. See :func:`demote_history`.
     """
     producer = tree.producer_of(name, artifact)
     producer_sha = tree.sha256(producer) if producer else None
@@ -159,6 +179,8 @@ def audit_artifact(tree: Tree, name, artifact, read_source=True):
         if source is not None:
             source_findings, summary = audit_source(source, **names)
             findings += source_findings
+    if superseded_by:
+        findings = demote_history(findings, f"artifact superseded by `{superseded_by}`, kept as history")
     return findings, summary
 
 
@@ -207,6 +229,17 @@ def main():
 
     if args.self_check:
         gates, negatives = self_check()
+        _blk = [(BLOCKING, "freshness", "stale"), (REPORT, "counters", "note")]
+        gates["G16_history_demotion_lowers_blocking_to_report"] = (
+            demote_history(_blk, "why")[0][0] == REPORT)
+        #  A demotion that dropped findings, or that quietly rewrote unrelated ones, would be an off
+        #  switch wearing the costume of a severity change. Both halves are held here.
+        negatives["N22_history_demotion_keeps_the_finding_trips_G16"] = (
+            len(demote_history(_blk, "why")) == 2
+            and "why" in demote_history(_blk, "why")[0][2]
+            and "stale" in demote_history(_blk, "why")[0][2])
+        negatives["N23_history_demotion_leaves_reports_untouched_trips_G16"] = (
+            demote_history(_blk, "why")[1] == _blk[1])
         #  The source tier carries its own gates; a self-check that skipped them would attest less than
         #  the tool actually claims.
         cov_gates, cov_negatives = self_check_coverage()

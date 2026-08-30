@@ -2,6 +2,30 @@
 
 All notable changes to `preflight`. Dates are ISO 8601. Versions follow semantic versioning.
 
+## [0.6.0] — 2026-08-30
+
+Superseded artifacts are history, and history is allowed to be stale.
+
+### Added
+- `demote_history()` and the `superseded_by` argument to `audit_artifact()`. An artifact another one has
+  replaced can never be refreshed — its producer has moved on, sometimes no longer emitting under that
+  name at all — and its pins point at versions that have themselves been replaced. Blocking on it demands
+  a repair that cannot be performed and that nobody wants performed. Its blocking findings become
+  **reports carrying the reason**; they are not dropped.
+
+  Measured on a real archive, this accounted for **7 of 12** remaining blockers, all on two artifacts
+  whose successors were already published and green.
+
+### The safeguard, which is the whole design
+A host that can mark an artifact non-authoritative can hide staleness, so this is only safe when the
+supersession set is **derived from what artifacts themselves declare** — never hand-maintained, which
+would be an off switch for exactly the decay the tool exists to surface. Callers are expected to derive
+it; when the registry is missing, nothing is demoted, because absence of evidence is not an exemption.
+
+`G16` holds the demotion; `N22` holds that the finding survives with its reason attached, and `N23` that
+untouched severities are left alone — a demotion that dropped findings would be an off switch wearing the
+costume of a severity change. Self-check: 16 gates / 23 controls.
+
 ## [0.5.0] — 2026-08-30
 
 Two blocking rules were firing on conventions that are not defects. Measured against a real archive of
