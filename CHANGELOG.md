@@ -2,6 +2,39 @@
 
 All notable changes to `preflight`. Dates are ISO 8601. Versions follow semantic versioning.
 
+## [0.5.0] — 2026-08-30
+
+Two blocking rules were firing on conventions that are not defects. Measured against a real archive of
+490 artifacts, **19 of its 35 blocking findings were misfires** — and none of the 19 was a defect.
+
+### Fixed
+- **Vacuity blocks only on a boolean literal.** The rule exists for one shape: `"control": True`, a
+  control asserted rather than computed. It was firing on any fixed value, so a producer collecting
+  statistics into a dict whose name the project had declared as a control name had its `"rows": []`
+  blocked as a vacuous control. A list is not a claim that a gate can fail — there is nothing to
+  demonstrate and nothing to block. Restricting to booleans keeps every real instance, since a control
+  *is* a boolean, and asks no project to rename anything.
+- **A partial run may count fewer entries than it carries.** A run over a reduced sample cannot evaluate
+  every gate; those needing the full sample are neutralised and excluded, so the artifact honestly
+  reports an *effective* count below the number of entries present. This accounted for **all eighteen**
+  counter blockers in the archive, across five partial artifacts, none of them a defect.
+
+  The relaxation is one-sided, which is what makes it safe: under-counting on a partial run is the
+  documented convention and such artifacts are non-authoritative by construction, while **over**-counting
+  is never explainable that way and keeps blocking everywhere. An authoritative artifact keeps blocking
+  in both directions.
+
+### Added
+- `G14`/`N19` hold the boolean restriction; `N17`/`N18` keep the blocker sharp on `False` and on boolean
+  expressions. `G15` holds the partial-run relaxation; `N20`/`N21` hold it one-sided — an inflated count
+  on a partial run, and any mismatch on an authoritative one, must still block. Self-check is now
+  15 gates / 21 controls.
+
+### Why this is not weakening the tool
+A checker that blocks on sound work teaches people to route around it, and every one of these 19 findings
+would have done exactly that. The remaining 16 blockers in that archive are real: stale artifacts whose
+producer has changed, and pins that no longer resolve.
+
 ## [0.4.0] — 2026-08-30
 
 The source tier learns to follow a variable, and the reader is finally held to its own discipline.

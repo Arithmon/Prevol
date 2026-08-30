@@ -142,6 +142,26 @@ def _is_literal(node):
     return not _referenced(node) and not _called(node)
 
 
+def _is_boolean_literal(node):
+    """True for a fixed BOOLEAN — `True`, `False`, or an expression of them alone.
+
+    The vacuity blocker exists for one shape: `"control": True`, a control asserted rather than computed.
+    It must not fire on a dict entry that is simply *data*. Measured against a real archive: a producer
+    collecting statistics into a dict whose name the project had declared as a control name carried a
+    field `"rows": []`, and an empty list was blocked as a vacuous control. That is a category error —
+    a list is not a claim that a gate can fail, so there is nothing to demonstrate and nothing to block.
+
+    Restricting the blocker to booleans keeps every real instance (a control IS a boolean) and drops the
+    misfires, without asking projects to rename anything.
+    """
+    if not _is_literal(node):
+        return False
+    for child in ast.walk(node):
+        if isinstance(child, ast.Constant) and not isinstance(child.value, bool):
+            return False
+    return any(isinstance(c, ast.Constant) and isinstance(c.value, bool) for c in ast.walk(node))
+
+
 def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_CONTROL_NAMES):
     """Extract gates and negative controls from a producer's source.
 
@@ -169,7 +189,8 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
                     and isinstance(target.slice, ast.Constant)
                     and isinstance(target.slice.value, str)):
                 reassigned.setdefault(target.value.id, {})[target.slice.value] = {
-                    "calls": _resolve(node.value, bound), "literal": _is_literal(node.value)}
+                    "calls": _resolve(node.value, bound), "literal": _is_literal(node.value),
+                    "boolean_literal": _is_boolean_literal(node.value)}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
             continue
@@ -183,11 +204,13 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
         for key, value in zip(node.value.keys, node.value.values):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
-            entry = {"calls": _resolve(value, bound), "literal": _is_literal(value)}
+            entry = {"calls": _resolve(value, bound), "literal": _is_literal(value),
+                     "boolean_literal": _is_boolean_literal(value)}
             later = {k: v for name in targets for k, v in reassigned.get(name, {}).items()}
             if key.value in later:      # seeded here, computed further down
                 entry = {"calls": entry["calls"] | later[key.value]["calls"],
-                         "literal": later[key.value]["literal"]}
+                         "literal": later[key.value]["literal"],
+                         "boolean_literal": later[key.value].get("boolean_literal", False)}
             out[bucket][key.value] = entry
     return out
 
@@ -254,7 +277,7 @@ def check_vacuity(structure):
     gate_calls = set().union(*(g["calls"] for g in gates.values())) if gates else set()
     findings = []
     for name, entry in controls.items():
-        if entry["literal"]:
+        if entry.get("boolean_literal"):
             findings.append((BLOCKING, VACUITY,
                              f"negative control `{name}` is a constant expression — it holds by "
                              f"construction and demonstrates nothing"))
@@ -355,9 +378,12 @@ def self_check_coverage():
         check_coverage(struct)[1]["covered"] == 1)
     gates["G12_follows_a_chain_of_two_bindings"] = (
         "passes" in read_structure(chained)["gates"]["G3_holds"]["calls"])
-    gates["G13_literal_control_still_blocks"] = any(
+    gates["G13_boolean_literal_control_still_blocks"] = any(
         f[0] == BLOCKING for f in check_vacuity(
             read_structure("gates = {'G1_x': f(1)}\nnegatives = {'N1_y': True}\n")))
+    gates["G14_data_field_does_not_block"] = not any(
+        f[0] == BLOCKING for f in check_vacuity(
+            read_structure("gates = {'G1_x': f(1)}\nnegatives = {'rows': []}\n")))
 
     #  The load-bearing negative: resolution must not manufacture coverage. A control calling only an
     #  unrelated function shares nothing with the gate even once bindings are followed, so it must STILL
@@ -370,6 +396,17 @@ def self_check_coverage():
     negatives["N15_unbound_name_adds_no_call_trips_G10"] = (
         read_structure("gates = {'G1_x': bool(never_assigned)}\n"
                        "negatives = {'N1_y': f(1)}\n")["gates"]["G1_x"]["calls"] == {"bool"})
+    #  The blocker must stay sharp: narrowing it to booleans must not let a real asserted control through,
+    #  in any of the shapes one is actually written.
+    negatives["N17_false_literal_still_blocks_trips_G13"] = any(
+        f[0] == BLOCKING for f in check_vacuity(
+            read_structure("gates = {'G1_x': f(1)}\nnegatives = {'N1_y': False}\n")))
+    negatives["N18_boolean_expression_still_blocks_trips_G13"] = any(
+        f[0] == BLOCKING for f in check_vacuity(
+            read_structure("gates = {'G1_x': f(1)}\nnegatives = {'N1_y': True and not False}\n")))
+    negatives["N19_computed_control_never_blocks_trips_G14"] = not any(
+        f[0] == BLOCKING for f in check_vacuity(
+            read_structure("gates = {'G1_x': f(1)}\nnegatives = {'N1_y': not f(2)}\n")))
     negatives["N16_resolution_is_bounded_not_global_trips_G12"] = (
         "far" not in read_structure(
             "a = far(1)\nb = a\nc = b\nd = c\n"

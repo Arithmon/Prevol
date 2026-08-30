@@ -14,7 +14,7 @@ from .core import (  # noqa: F401
     check_partial_run_discipline, check_provenance, declared_pins, read_boolean_table, self_check, severity_counts, verdict,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "BLOCKING", "REPORT", "UNREADABLE", "check_counter_coherence", "check_freshness", "check_mutation_probe",
     "check_partial_run_discipline", "check_provenance", "declared_pins", "read_boolean_table",

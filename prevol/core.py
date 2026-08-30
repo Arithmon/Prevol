@@ -109,8 +109,21 @@ def check_counter_coherence(artifact):
     Counters are the part of an artifact a reader is most likely to quote and least likely to verify.
     They are also the easiest to edit by hand and forget. A counter that no checker can reproduce is an
     auditability defect regardless of whether it happens to be right.
+
+    ## Partial runs legitimately count fewer entries than they carry
+
+    A run over a reduced sample cannot evaluate every gate: those needing the full sample are *neutralised*
+    and excluded from the total, so the artifact honestly reports an **effective** count lower than the
+    number of entries it carries. Measured against a real archive, this convention accounted for **every
+    one** of the counter blockers — five partial artifacts, eighteen findings, none of them a defect.
+
+    The asymmetry is what makes this safe to relax. Under-counting on a partial run is the documented
+    convention, and such artifacts are non-authoritative by construction. **Over**-counting is never
+    explainable that way: claiming more gates than are present can only be an error or an inflation, so
+    it keeps blocking everywhere. An authoritative artifact keeps blocking in both directions.
     """
     findings = []
+    partial = bool(artifact.get("limited_run"))
     for block, passed_key, total_key in (("gates", "gates_passed", "gates_total"),
                                          ("negatives", "negatives_passed", "negatives_total")):
         if block not in artifact:
@@ -125,13 +138,19 @@ def check_counter_coherence(artifact):
         if passed_key in artifact:
             declared, actual = artifact[passed_key], sum(1 for v in table.values() if v)
             if declared != actual:
-                findings.append((BLOCKING, COUNTERS,
-                                 f"`{passed_key}` = {declared} but `{block}` holds {actual} true entry/entries"))
+                undercount = partial and declared < actual
+                findings.append((REPORT if undercount else BLOCKING, COUNTERS,
+                                 f"`{passed_key}` = {declared} but `{block}` holds {actual} true entry/entries"
+                                 + (" — partial run, gates needing the full sample are neutralised"
+                                    if undercount else "")))
         else:
             findings.append((REPORT, COUNTERS, f"`{block}` carries no `{passed_key}` counter"))
         if total_key in artifact and artifact[total_key] != len(table):
-            findings.append((BLOCKING, COUNTERS,
-                             f"`{total_key}` = {artifact[total_key]} but `{block}` holds {len(table)} entries"))
+            undercount = partial and artifact[total_key] < len(table)
+            findings.append((REPORT if undercount else BLOCKING, COUNTERS,
+                             f"`{total_key}` = {artifact[total_key]} but `{block}` holds {len(table)} entries"
+                             + (" — partial run, gates needing the full sample are neutralised"
+                                if undercount else "")))
     return findings
 
 
@@ -316,6 +335,17 @@ def self_check():
     negatives["N2_anonymous_list_is_unreadable_trips_G3"] = read_boolean_table([{"breaks": True}])[0] is None
     negatives["N3_correct_counter_does_not_block_trips_G4"] = not any(
         f[0] == BLOCKING for f in check_counter_coherence({"gates": {"A": True}, "gates_passed": 1}))
+    gates["G15_partial_undercount_reports_not_blocks"] = not any(
+        f[0] == BLOCKING for f in check_counter_coherence(
+            {"gates": {"A": True, "B": True}, "gates_total": 1, "limited_run": True}))
+    #  The relaxation must stay one-sided in both of the ways it could leak: an inflated count on a
+    #  partial run, and any mismatch at all on an authoritative one.
+    negatives["N20_partial_overcount_still_blocks_trips_G15"] = any(
+        f[0] == BLOCKING for f in check_counter_coherence(
+            {"gates": {"A": True}, "gates_total": 5, "limited_run": True}))
+    negatives["N21_authoritative_undercount_still_blocks_trips_G15"] = any(
+        f[0] == BLOCKING for f in check_counter_coherence(
+            {"gates": {"A": True, "B": True}, "gates_total": 1}))
     negatives["N4_absence_of_pins_invents_none_trips_G5"] = declared_pins({"note": "no upstream"}) == []
     negatives["N5_truncated_hash_is_not_a_pin_trips_G5"] = declared_pins({"upstream": {"a": "abc"}}) == []
     negatives["N6_consistent_partial_name_does_not_block_trips_G6"] = not any(
