@@ -181,16 +181,29 @@ def read_structure(source, gate_names=DEFAULT_GATE_NAMES, control_names=DEFAULT_
     #  three constants the first version reported, and both were sound.
     bound = _local_bindings(tree)
     reassigned = {}
+    #  An AUGMENTED assignment (`st["rem"] &= flag`) recomputes the entry from its seed: the result is a
+    #  literal only if the right-hand side is. Measured on a real producer: `st = {"rem": True, ...}` then
+    #  `st["rem"] &= i["remainders_zeroed"]` was blocked as a constant control.
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
+        if isinstance(node, ast.Assign):
+            targets, augmented = node.targets, False
+        elif isinstance(node, ast.AugAssign):
+            targets, augmented = [node.target], True
+        else:
             continue
-        for target in node.targets:
+        for target in targets:
             if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
                     and isinstance(target.slice, ast.Constant)
                     and isinstance(target.slice.value, str)):
-                reassigned.setdefault(target.value.id, {})[target.slice.value] = {
-                    "calls": _resolve(node.value, bound), "literal": _is_literal(node.value),
-                    "boolean_literal": _is_boolean_literal(node.value)}
+                slot = reassigned.setdefault(target.value.id, {})
+                entry = {"calls": _resolve(node.value, bound), "literal": _is_literal(node.value),
+                         "boolean_literal": _is_boolean_literal(node.value)}
+                if augmented and target.slice.value in slot:
+                    prior = slot[target.slice.value]
+                    entry = {"calls": entry["calls"] | prior["calls"],
+                             "literal": entry["literal"] and prior["literal"],
+                             "boolean_literal": entry["boolean_literal"] and prior["boolean_literal"]}
+                slot[target.slice.value] = entry
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
             continue
@@ -343,6 +356,16 @@ def self_check():
               "negatives['N1_seeded'] = not pred(0)\n")
     negatives["N7_a_seeded_control_computed_later_is_not_constant_trips_G4"] = (
         check_vacuity(read_structure(seeded)) == [])
+    accumulated = ("gates = {'G1_holds': pred(1)}\n"
+                   "st = {'rem': True}\n"
+                   "st['rem'] &= flag(0)\n")
+    negatives["N7b_a_seeded_control_accumulated_by_augassign_is_not_constant_trips_G4"] = not any(
+        f[0] == BLOCKING for f in check_vacuity(read_structure(accumulated, control_names=("st",))))
+    still_constant = ("gates = {'G1_holds': pred(1)}\n"
+                      "st = {'rem': True}\n"
+                      "st['rem'] &= False\n")
+    negatives["N7c_augassign_of_a_literal_stays_constant_trips_G4"] = any(
+        f[0] == BLOCKING for f in check_vacuity(read_structure(still_constant, control_names=("st",))))
     return gates, negatives
 
 

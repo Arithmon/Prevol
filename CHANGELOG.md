@@ -2,6 +2,20 @@
 
 All notable changes to `preflight`. Dates are ISO 8601. Versions follow semantic versioning.
 
+## [0.6.1] — 2026-10-01
+
+### Fixed
+- `read_structure` now follows **augmented assignments** to a seeded entry. A producer collecting
+  statistics into a dict the host declares as a control name — `st = {"rem": True, ...}` followed by
+  `st["rem"] &= chunk["remainders_zeroed"]` — had its seed read as a constant control and **blocked** as
+  vacuous. An augmented assignment recomputes the entry from its seed: the result is a literal only if
+  both the seed and the right-hand side are, and it inherits the calls of both.
+
+  Measured on a real producer, where this was the only blocking finding.
+
+`N7b` holds that an entry accumulated by `&=` from a call is no longer constant; `N7c` that `&= False` on a
+literal seed still blocks — a fix that let every augmented assignment through would be an off switch.
+
 ## [0.6.0] — 2026-08-30
 
 Superseded artifacts are history, and history is allowed to be stale.
